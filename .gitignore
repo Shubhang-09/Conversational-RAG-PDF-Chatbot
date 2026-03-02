@@ -1,0 +1,14 @@
+# Ignore environment files
+.env
+__pycache__/
+*.pyc
+
+# Streamlit secrets
+.streamlit/
+
+# Vectorstore cache (if added later)
+chroma/
+
+# OS files
+.DS_Store
+Thumbs.db
