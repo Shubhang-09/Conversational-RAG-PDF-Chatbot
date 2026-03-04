@@ -14,7 +14,7 @@ from langchain_community.chat_message_histories import ChatMessageHistory
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(page_title="Conversational RAG Assistant", page_icon="📄")
 st.title("📄 Conversational RAG with PDF & Chat History")
-st.write("Upload PDFs and ask contextual questions.")
+st.caption("Upload PDFs and ask contextual questions using Groq + LangChain")
 
 # ---------------- API KEY HANDLING ----------------
 api_key = None
@@ -44,28 +44,29 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-if uploaded_files:
+# ---------------- SESSION CHAT MEMORY ----------------
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-    documents = []
+if "store" not in st.session_state:
+    st.session_state.store = {}
 
-    for uploaded_file in uploaded_files:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-            tmp_file.write(uploaded_file.getvalue())
-            tmp_path = tmp_file.name
+def get_session_history(session_id: str):
+    if session_id not in st.session_state.store:
+        st.session_state.store[session_id] = ChatMessageHistory()
+    return st.session_state.store[session_id]
 
-        loader = PyPDFLoader(tmp_path)
-        docs = loader.load()
-        documents.extend(docs)
+# ---------------- VECTOR STORE CREATION ----------------
+@st.cache_resource
+def build_vectorstore(_documents):
 
-    # ---------------- TEXT SPLITTING ----------------
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1200,
         chunk_overlap=200
     )
 
-    splits = text_splitter.split_documents(documents)
+    splits = text_splitter.split_documents(_documents)
 
-    # ---------------- EMBEDDINGS ----------------
     embeddings = HuggingFaceEmbeddings(
         model_name="all-MiniLM-L6-v2"
     )
@@ -76,11 +77,30 @@ if uploaded_files:
         collection_name="rag_collection"
     )
 
+    return vectorstore
+
+# ---------------- PROCESS PDFS ----------------
+if uploaded_files:
+
+    documents = []
+
+    for uploaded_file in uploaded_files:
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+            tmp_file.write(uploaded_file.getvalue())
+            tmp_path = tmp_file.name
+
+        loader = PyPDFLoader(tmp_path)
+        docs = loader.load()
+        documents.extend(docs)
+
+    vectorstore = build_vectorstore(documents)
     retriever = vectorstore.as_retriever()
 
     # ---------------- PROMPT ----------------
     system_prompt = """
 You are a helpful assistant.
+
 Answer the question using only the provided context.
 If the answer is not in the context, say you don't know.
 
@@ -96,11 +116,11 @@ Context:
         ]
     )
 
-    # ---------------- FORMAT RETRIEVED DOCS ----------------
+    # ---------------- FORMAT DOCS ----------------
     def format_docs(docs):
         return "\n\n".join(doc.page_content for doc in docs)
 
-    # ---------------- LCEL RAG PIPELINE ----------------
+    # ---------------- RAG CHAIN ----------------
     rag_chain = (
         {
             "context": lambda x: format_docs(retriever.invoke(x["question"])),
@@ -112,15 +132,6 @@ Context:
         | StrOutputParser()
     )
 
-    # ---------------- CHAT HISTORY STORE ----------------
-    if "store" not in st.session_state:
-        st.session_state.store = {}
-
-    def get_session_history(session_id: str):
-        if session_id not in st.session_state.store:
-            st.session_state.store[session_id] = ChatMessageHistory()
-        return st.session_state.store[session_id]
-
     conversational_rag = RunnableWithMessageHistory(
         rag_chain,
         get_session_history,
@@ -128,14 +139,31 @@ Context:
         history_messages_key="chat_history",
     )
 
-    # ---------------- CHAT UI ----------------
+    # ---------------- DISPLAY OLD MESSAGES ----------------
+    for msg in st.session_state.messages:
+        st.chat_message(msg["role"]).write(msg["content"])
+
+    # ---------------- CHAT INPUT ----------------
     user_input = st.chat_input("Ask a question about your PDFs")
 
     if user_input:
+
+        st.session_state.messages.append(
+            {"role": "user", "content": user_input}
+        )
+
+        st.chat_message("user").write(user_input)
+
         response = conversational_rag.invoke(
             {"question": user_input},
             config={"configurable": {"session_id": "default_session"}}
         )
 
-        st.chat_message("user").write(user_input)
+        st.session_state.messages.append(
+            {"role": "assistant", "content": response}
+        )
+
         st.chat_message("assistant").write(response)
+
+else:
+    st.info("Upload at least one PDF to start chatting.")
