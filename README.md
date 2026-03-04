@@ -1,5 +1,11 @@
 # Conversational RAG with PDF
 
+## Live Demo
+
+https://conversational-rag-pdf-chatbot-stkadgejwmmx6fjacmz9b5.streamlit.app
+
+## Overview
+
 This project is a Streamlit application where users can upload one or more PDF files and ask questions about them in a conversational way.
 
 It uses a Retrieval-Augmented Generation (RAG) pipeline so that answers are generated based only on the uploaded documents. The app also maintains chat history, allowing follow-up questions within the same session.
